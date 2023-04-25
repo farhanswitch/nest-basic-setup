@@ -7,22 +7,39 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
   private db: Connection;
   constructor(private readonly dbConfig: MysqlService) {}
 
-  public async query<BindingType>(queryString: string, binding?: Array<BindingType>) {
+  public async query<ValueType>(queryString: string, values?: Array<ValueType>) {
     return new Promise(async (resolve, reject) => {
       try {
         if (!this.db) this.handleConnect();
-        resolve(((await this.db.promise().query(queryString, binding)) as unknown as [[unknown]])?.[0]?.[0]);
+        resolve(((await this.db.promise().query(queryString, values)) as unknown as [[unknown]])?.[0]?.[0]);
       } catch (error) {
-        if ((error as { message: string })?.message === 'Cannot unquery after fatal error') this.handleReconnect();
+        this.handleError(error as Error & { code: string });
         reject(error);
       }
     });
   }
+  public async rawQuery<ValueType>(queryString: string, values?: Array<ValueType>) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (!this.db) this.handleConnect();
+        resolve(((await this.db.promise().query(queryString, values)) as unknown as [unknown])?.[0]);
+      } catch (error) {
+        this.handleError(error as Error & { code: string });
+        reject(error);
+      }
+    });
+  }
+  private handleError(error: Error & { code: string }): void {
+    if (error.message.match(/Cannot enqueue Query after fatal error/i) || error?.code === 'PROTOCOL_CONNECTION_LOST') {
+      this.handleReconnect();
+      console.log(`RECOVER FROM FATAL ERROR ${new Date().toString()}`);
+    }
+  }
   private handleConnect() {
     import('mysql2')
-      .then((my) => {
+      .then((module) => {
         try {
-          this.db = my.createConnection({
+          this.db = module.createConnection({
             ...this.dbConfig,
             timezone: '+00:00',
           });
